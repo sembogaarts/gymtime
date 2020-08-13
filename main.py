@@ -12,6 +12,10 @@ class BasicFit:
     password = ""
     user = None
 
+    # Prefered
+    pref_club = None
+    pref_time = None
+
     # Session
     session = None
 
@@ -28,11 +32,15 @@ class BasicFit:
     clubs_url = "https://my.basic-fit.com/door-policy/get-clubs"
     times_url = "https://my.basic-fit.com/door-policy/get-availability"
     book_url = "https://my.basic-fit.com/door-policy/book-door-policy"
+    open_reservation_url = "https://my.basic-fit.com/door-policy/get-open-reservation"
 
-    def __init__(self, username, password):
+    def __init__(self, username, password, club, time):
         #  Add arguments
         self.username = username
         self.password = password
+        # Prefered
+        self.pref_club = club
+        self.pref_time = time
         # Creates a new basic sessionsem
         self.create_new_session()
         # Get user credentials
@@ -40,13 +48,19 @@ class BasicFit:
         # Auth
         logged_in = self.login()
         #
-        if logged_in:
-            # Steps required before reservation
-            self.get_clubs()  # Get all clubs from basic
-            # Make the actual reservation
-            self.make_reservation()
-        else:
-            print("Error")
+        if not logged_in:
+            print("Unable to login at Basic-Fit")
+            exit()
+        # Check if the user can reserve
+        can_reserve = not self.has_open_reservation()
+        # Perform check
+        if not can_reserve:
+            print("You already have an open reservation")
+            exit()
+        # Steps required before reservation
+        self.get_clubs()  # Get all clubs from basic
+        # Make the actual reservation
+        self.make_reservation()
 
     def make_reservation(self):
         """ Make reservation interactive """
@@ -61,7 +75,9 @@ class BasicFit:
         self.post_reservation()
 
     def ask_for_time(self):
-        raw_time = input("At what time? (hh:mm): ")
+        """ Asks the user for time """
+        raw_time = self.pref_time if self.pref_time else input("At what time? (hh:mm): ")
+        # Check if slot is available
         for time in self.times:
             # Check if name contains
             if time["startDateTime"][-8:-3] == raw_time and time["openForReservation"]:
@@ -69,11 +85,12 @@ class BasicFit:
                 self.reserve_at = time
                 return True
         # Not available
-        return False
+        self.pref_time = None
+        return self.ask_for_time()
 
     def ask_for_club(self):
         """ Asks the user what gym to reserve """
-        raw_club = input("Which gym would you like?: ")
+        raw_club = self.pref_club if self.pref_club else input("Which gym would you like?: ")
         # Make list for all possible clubs
         possible = []
         # Do loop
@@ -83,7 +100,8 @@ class BasicFit:
                 possible.append(club)
         # Check if club found
         if len(possible) == 0:
-            print("Nothing found...")
+            # Not available
+            self.pref_time = None
             return self.ask_for_club()
         elif len(possible) == 1:
             self.club = possible[0]
@@ -174,7 +192,14 @@ class BasicFit:
         """ Do actual reservation """
         res = self.session.post(self.book_url, self.create_reservation_request_body())
 
-        print(res.content)
+    def has_open_reservation(self):
+        """ Check for open reservation """
+        res = self.session.get(self.open_reservation_url)
+        # Check if data isset
+        if len(res.json()["data"]) > 0:
+            return True
+        else:
+            return False
 
 def main():
     """ Shorcut for passing username and password """
@@ -182,10 +207,15 @@ def main():
     # Add arguments
     parser.add_argument('-u', dest="username")
     parser.add_argument('-p', dest="password")
+    parser.add_argument('-c', dest="club")
+    parser.add_argument('-t', dest="time")
     # Parse
     args = parser.parse_args()
     # New Basic Instance
-    BasicFit(args.username, args.password)
+    BasicFit(args.username,
+             args.password,
+             args.club,
+             args.time)
 
 
 main()
