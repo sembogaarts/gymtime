@@ -3,18 +3,20 @@ import argparse
 import requests
 from datetime import datetime
 from datetime import timedelta
+import time
 
 
 class BasicFit:
-
     # Authentication
-    username = ""
-    password = ""
+    cookie = ""
     user = None
 
     # Prefered
     pref_club = None
     pref_time = None
+    pref_hour = None
+    pref_minutes = None
+    pref_diff = None
 
     # Session
     session = None
@@ -28,7 +30,7 @@ class BasicFit:
     reserve_at = None
 
     # Urls
-    login_url = "https://my.basic-fit.com/authentication/login"
+    member_url = "https://my.basic-fit.com/member/get-member"
     clubs_url = "https://my.basic-fit.com/door-policy/get-clubs"
     times_url = "https://my.basic-fit.com/door-policy/get-availability"
     book_url = "https://my.basic-fit.com/door-policy/book-door-policy"
@@ -46,9 +48,9 @@ class BasicFit:
         # Get user credentials
         self.ask_for_credentials()
         # Auth
-        logged_in = self.login()
+        self.get_member()
         #
-        if not logged_in:
+        if not self.user:
             print("Unable to login at Basic-Fit")
             exit()
         # Check if the user can reserve
@@ -64,7 +66,7 @@ class BasicFit:
 
     def make_reservation(self):
         """ Make reservation interactive """
-        print("Hi " + self.user["member"]["first_name"])
+        print("Hi " + self.user["first_name"])
         # Ask for the club
         self.ask_for_club()
         # Get times for the club
@@ -76,7 +78,11 @@ class BasicFit:
 
     def ask_for_time(self):
         """ Asks the user for time """
-        raw_time = self.pref_time if self.pref_time else input("At what time? (hh:mm): ")
+        raw_time = self.pref_time if self.pref_time else input("At what time? [hh:mm]: ")
+        # Parse time
+        self.pref_hour = raw_time[0:2]
+        self.pref_minutes = raw_time[3:5]
+        self.pref_time = raw_time
         # Check if slot is available
         for time in self.times:
             # Check if name contains
@@ -85,8 +91,56 @@ class BasicFit:
                 self.reserve_at = time
                 return True
         # Not available
-        self.pref_time = None
-        return self.ask_for_time()
+        return self.time_unavailable()
+
+    def time_unavailable(self):
+        #
+        print("Timeslot is full, I will retry every 2 minutes.")
+
+        self.pref_diff = int(input("How many slots?: "))
+
+        if not self.pref_diff:
+            self.pref_diff = 1
+        else:
+
+            parsed = datetime.strptime(self.pref_time, '%H:%M')
+
+            diff = timedelta(minutes=self.pref_diff * 15)
+
+            final = parsed - diff
+
+            self.pref_time = '{}:{}'.format(final.hour, final.minute)
+
+            self.pref_diff = (self.pref_diff * 2) + 1
+
+        self.book_loop()
+
+    def book_loop(self):
+
+        self.get_times()
+
+        for x in range(self.pref_diff):
+
+            parsed = datetime.strptime(self.pref_time, '%H:%M')
+
+            diff = timedelta(minutes=(15 * (x + 1)))
+
+            final = parsed + diff
+
+            timeslot = '{}:{}'.format(final.hour, str(final.minute).ljust(2, '0'))
+
+            print('Trying: {}'.format(timeslot))
+
+            for basicSlot in self.times:
+                # Check if name contains
+                if basicSlot["startDateTime"][-8:-3] == timeslot and basicSlot["openForReservation"]:
+                    # Timeslot is open
+                    self.reserve_at = basicSlot
+                    return True
+
+        time.sleep(30)
+
+        self.book_loop()
 
     def ask_for_club(self):
         """ Asks the user what gym to reserve """
@@ -128,30 +182,8 @@ class BasicFit:
 
     def ask_for_credentials(self):
         """ Asks the user to enter credentials """
-        if not self.username:
-            self.username = input("Username: ")
-        if not self.password:
-            self.password = input("Password: ")
-
-    def create_login_request_body(self):
-        """ Creates a body for the login request """
-        return json.dumps({
-            "email": self.username,
-            "password": self.password,
-            "cardNumber": ""
-        })
-
-    def login(self):
-        """ Handles the actual login request """
-        res = self.session.post(self.login_url, self.create_login_request_body())
-        # Check for status
-        if res.status_code == 200:
-            # Store User
-            self.user = res.json()
-            return True
-        else:
-            print(res.content)
-            return False
+        self.cookie = input("Cookie: ")
+        self.session.headers.update({'cookie': self.cookie})
 
     def get_clubs(self):
         """ Get all of the clubs of Basic Fit """
@@ -163,11 +195,21 @@ class BasicFit:
         else:
             return False
 
+    def get_member(self):
+        """ Get all of the clubs of Basic Fit """
+        req = self.session.get(self.member_url)
+        # Check for status
+        if req.status_code == 200:
+            self.user = req.json()
+            return True
+        else:
+            return False
+
     def create_times_request_body(self):
         """ Creates a body for the login request """
         return json.dumps({
             "clubId": self.club["id"],
-            "dateTime": (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
+            "dateTime": datetime.today().strftime('%Y-%m-%d')
         })
 
     def get_times(self):
@@ -185,7 +227,7 @@ class BasicFit:
         return json.dumps({
             "clubOfChoice": self.club,
             "doorPolicy": self.reserve_at,
-            "duration": 120
+            "duration": 90
         })
 
     def post_reservation(self):
@@ -200,6 +242,7 @@ class BasicFit:
             return True
         else:
             return False
+
 
 def main():
     """ Shorcut for passing username and password """
