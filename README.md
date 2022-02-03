@@ -1,32 +1,36 @@
-# Reserveer Gymtime
+# Basic-Fit CLI (unofficial)
 
-Reserveer eenvoudig via je CLI een sessie bij je favoriete Basic-Fit vestiging. Zit je sessie vol? Geen probleem, we controleren steeds opnieuw of er al een plekje vrij is gekomen.
+Tired of checking the Basic-Fit app again and again for your favourite time to be available? This script allows you to reserve your sessions through the CLI.
 
-**Disclaimer:** _Gebruik van de tool is op eigen risico! Het kan zijn dat de tool geen reservering kan maken: dit gebeurt vaak bij drukke Basic-Fit vestigingen._
 
-## Vereisten
-* Python 3
-* Pip 3
 
-## Cookie
-Momenteel is alleen inloggen via je Cookie mogelijk. Om je cookie te bemachtigen doorloop je de volgende stappen:
+**Disclaimer:** _Use this script on your own risk, I recommend you to keep the interval above 15 seconds._
 
-1. Login op https://my.basic-fit.com/
-2. Open je ontwikkel tools, ga naar netwerk en zoek het het `visits` verzoek.
-3. Kopieer de gehele cookie uit het `request` **(dus niet het response)**
-4. Gebruik deze Cookie om in te loggen via de tool
+## Requirements
 
-## Installeren
+| Package | Version |
+|---------|---------|
+| Python  | 3       |
+| Pip     | 3       |
 
+
+## Installation
+If you don't want to install the packages on your system, it's also possible to create a venv.
 ```
 pip install -r requirements.txt
 ```
 
-## Uitvoeren
-Als je alle dependencies hebt geinstalleerd via pip kan je de tool starten met:
+## Usage
+After installation you'll be able the use the script with the following command.
+```
+usage: python main.py [-h] [-u EMAIL] [-p PASSWORD] [-d DATE] [-t TIME] [-i INTERVAL]
+
+optional arguments:
+  -h, --help   show this help message and exit
+  -u EMAIL     E-mail used for your Basic-Fit account
+  -p PASSWORD  Password used for your Basic-Fit account
+  -d DATE      Date for the reservations (dd-mm-yyyy)
+  -t TIME      Time for the reservations (hh:mm)
+  -i INTERVAL  Interval in seconds before retrying again
 
 ```
-python main.py 
-```
-
-Vul vervolgens je cookie in die je eerder hebt verzameld.
