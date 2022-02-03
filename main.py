@@ -1,268 +1,177 @@
-import json
 import argparse
-import requests
-from datetime import datetime
-from datetime import timedelta
 import time
+from datetime import datetime
+from getpass import getpass
+from api import basic_fit_api
 
 
 class BasicFit:
-    # Authentication
-    cookie = ""
+    # User information
     user = None
-
-    # Prefered
-    pref_club = None
-    pref_time = None
-    pref_hour = None
-    pref_minutes = None
-    pref_diff = None
-
-    # Session
+    open_reservations = 0
+    reservation = None
     session = None
+    availability = []
+    date_for_booking = None
 
-    # Clubs
-    club = None
-    clubs = []
+    # Constants
+    max_gym_duration = 90
+    max_open_reservations = 2
 
-    # Times
-    times = []
-    reserve_at = None
-
-    # Urls
-    member_url = "https://my.basic-fit.com/member/get-member"
-    clubs_url = "https://my.basic-fit.com/door-policy/get-clubs"
-    times_url = "https://my.basic-fit.com/door-policy/get-availability"
-    book_url = "https://my.basic-fit.com/door-policy/book-door-policy"
-    open_reservation_url = "https://my.basic-fit.com/door-policy/get-open-reservation"
-
-    def __init__(self, username, password, club, time):
-        #  Add arguments
-        self.username = username
+    def __init__(self, email, password, book_at_date, book_at_time, interval):
+        #  Add arguments from CLI
+        self.email = email
         self.password = password
-        # Prefered
-        self.pref_club = club
-        self.pref_time = time
-        # Creates a new basic sessionsem
-        self.create_new_session()
-        # Get user credentials
-        self.ask_for_credentials()
-        # Auth
-        self.get_member()
-        #
-        if not self.user:
-            print("Unable to login at Basic-Fit")
+        self.book_at_time = book_at_time
+        self.book_at_date = book_at_date
+        self.interval = interval or 30
+        # If the user didn't pass the credentials via the CLI
+        self.ask_for_credentials_if_missing()
+        # Create a new session for the user
+        self.session = self.login()
+        # Create a reservation
+        self.reservation = self.start_new_booking()
+        # Finished! Wrap everything up
+        self.inform_about_reservation()
+
+    def start_new_booking(self):
+        try:
+            # Get user information for a personalised CLI experience
+            self.user = basic_fit_api.get_member_information(self.session)
+            # Get the amount of open reservations
+            self.open_reservations = basic_fit_api.get_open_reservations_count(self.session)
+            # Check if it's possible to reserve more
+            if self.open_reservations >= self.max_open_reservations:
+                raise Exception("Maximum amount of bookings already")
+            # Give the user feedback that everything is OK
+            self.say_hi()
+            self.ask_for_date()
+            # Lets the to book
+            self.try_to_make_reservation()
+        except Exception as error:
+            print(error)
+            self.credits()
             exit()
-        # Check if the user can reserve
-        can_reserve = not self.has_open_reservation()
-        # Perform check
-        if not can_reserve:
-            print("You already have an open reservation")
-            exit()
-        # Steps required before reservation
-        self.get_clubs()  # Get all clubs from basic
-        # Make the actual reservation
-        self.make_reservation()
 
-    def make_reservation(self):
-        """ Make reservation interactive """
-        print("Hi " + self.user["first_name"])
-        # Ask for the club
-        self.ask_for_club()
-        # Get times for the club
-        self.get_times()
-        # Ask for the time
-        self.ask_for_time()
-        #
-        self.post_reservation()
+    def say_hi(self):
+        """ Give a little love to the member """
+        print("Hi {}, I selected {} as your gym, you have {} open booking(s).".format(
+            self.user["first_name"],
+            self.user["favorite_club"]["name"],
+            self.open_reservations)
+        )
 
-    def ask_for_time(self):
-        """ Asks the user for time """
-        raw_time = self.pref_time if self.pref_time else input("At what time? [hh:mm]: ")
-        # Parse time
-        self.pref_hour = raw_time[0:2]
-        self.pref_minutes = raw_time[3:5]
-        self.pref_time = raw_time
-        # Check if slot is available
-        for time in self.times:
-            # Check if name contains
-            if time["startDateTime"][-8:-3] == raw_time and time["openForReservation"]:
-                # Timeslot is open
-                self.reserve_at = time
-                return True
-        # Not available
-        return self.time_unavailable()
+    def ask_for_date(self):
+        """ Let's determine the date the member want to gym at """
+        if not self.book_at_date:
+            print("What date would you like me to book? (blank for today)")
+            self.book_at_date = input("[{}]: ".format(datetime.today().strftime('%d-%m-%Y')))
+        if not self.book_at_time:
+            print("What time would you like me to book?")
+            self.book_at_time = input("[hh:mm]: ")
+        # Parse the time
+        self.parse_time_for_booking()
 
-    def time_unavailable(self):
-        #
-        print("Timeslot is full, I will retry every 2 minutes.")
+    def parse_time_for_booking(self):
+        """  Try to parse the date to a workable format """
+        try:
+            # Defaults to today if blank
+            if not self.book_at_date:
+                self.book_at_date = datetime.today().strftime('%d-%m-%Y')
+            # Concat the date with the time
+            date_string = "{} {}".format(self.book_at_date, self.book_at_time)
+            # Parse the date string to a workable format
+            self.date_for_booking = datetime.strptime(date_string, '%d-%m-%Y %H:%M')
+        except:
+            print("Time format is invalid, use something like: 10:00 or 11:45")
+            self.book_at_time = None  # Clear the invalid time
+            self.book_at_date = None  # Clear the invalid date
+            self.ask_for_date()  # Ask again
 
-        self.pref_diff = int(input("How many slots?: "))
+    def try_to_make_reservation(self):
+        """ Checks if there's a session available for the date """
+        # Fetch the availability for favourite gym
+        self.availability = basic_fit_api.get_available_times_for_members_favourite_club(
+            self.session,
+            self.user,
+            self.date_for_booking
+        )
+        # Quick check for availability
+        if len(self.availability) == 0:
+            raise Exception("There are no more sessions available on this date")
+        # Check all policy's
+        for policy in self.availability:
+            # Parse the date string to a workable format
+            session_date = datetime.strptime(policy['startDateTime'], '%Y-%m-%dT%H:%M:%S.%f')
+            # Check for the specific time
+            if session_date.time() == self.date_for_booking.time():
+                # Create the reservation
+                return basic_fit_api.create_reservation(
+                    self.session,
+                    self.user["favorite_club"],
+                    policy,
+                    self.max_gym_duration
+                )
+        # Preferred time is unavailable
+        self.retry_to_book_preferred_time()
 
-        if not self.pref_diff:
-            self.pref_diff = 1
-        else:
+    def retry_to_book_preferred_time(self):
+        """ Fully booked at specified time """
+        print("{} seems to be fully booked at {}".format(self.user['favorite_club']['name'], self.book_at_time))
+        time.sleep(self.interval)
+        self.try_to_make_reservation()
 
-            parsed = datetime.strptime(self.pref_time, '%H:%M')
-
-            diff = timedelta(minutes=self.pref_diff * 15)
-
-            final = parsed - diff
-
-            self.pref_time = '{}:{}'.format(final.hour, final.minute)
-
-            self.pref_diff = (self.pref_diff * 2) + 1
-
-        self.book_loop()
-
-    def book_loop(self):
-
-        self.get_times()
-
-        for x in range(self.pref_diff):
-
-            parsed = datetime.strptime(self.pref_time, '%H:%M')
-
-            diff = timedelta(minutes=(15 * (x + 1)))
-
-            final = parsed + diff
-
-            timeslot = '{}:{}'.format(final.hour, str(final.minute).ljust(2, '0'))
-
-            print('Trying: {}'.format(timeslot))
-
-            for basicSlot in self.times:
-                # Check if name contains
-                if basicSlot["startDateTime"][-8:-3] == timeslot and basicSlot["openForReservation"]:
-                    # Timeslot is open
-                    self.reserve_at = basicSlot
-                    return True
-
-        time.sleep(30)
-
-        self.book_loop()
-
-    def ask_for_club(self):
-        """ Asks the user what gym to reserve """
-        raw_club = self.pref_club if self.pref_club else input("Which gym would you like?: ")
-        # Make list for all possible clubs
-        possible = []
-        # Do loop
-        for club in self.clubs:
-            # Check if name contains
-            if raw_club in club["name"].lower():
-                possible.append(club)
-        # Check if club found
-        if len(possible) == 0:
-            # Not available
-            self.pref_time = None
-            return self.ask_for_club()
-        elif len(possible) == 1:
-            self.club = possible[0]
-        else:
-            # Nice index for user
-            index = 1
-            # Display everything
-            for option in possible:
-                print("#" + str(index) + " - " + option["name"])
-                index += 1
-            # Ask user
-            raw_index = input("#: ")
-            # store
-            self.club = possible[int(raw_index) - 1]
-
-    def create_new_session(self):
-        """ Creates a new session """
-        self.session = requests.Session()
-        # Add required headers
-        self.session.headers.update({'Accept': 'application/json, text/plain, */*'})
-        self.session.headers.update({'authority': 'my.basic-fit.com'})
-        self.session.headers.update({'sec-ch-ua': '"Not A;Brand";v="99", "Chromium";v="90", "Google Chrome";v="90"'})
-        self.session.headers.update({'sec-ch-ua-mobile': '?0'})
-        self.session.headers.update({'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'})
-        self.session.headers.update({'Content-Type': 'application/json'})
-        self.session.headers.update({'mbf-rct-app-api-2-caller': 'true'})
-        self.session.headers.update({'mbfLoginHeadVForm': 'jk#Bea201'})
-
-    def ask_for_credentials(self):
+    def ask_for_credentials_if_missing(self):
         """ Asks the user to enter credentials """
-        self.cookie = input("Cookie: ")
-        self.session.headers.update({'cookie': self.cookie})
+        if not self.email:
+            self.email = input("Email: ")
+        if not self.password:
+            self.password = getpass()
 
-    def get_clubs(self):
-        """ Get all of the clubs of Basic Fit """
-        req = self.session.get(self.clubs_url)
-        # Check for status
-        if req.status_code == 200:
-            self.clubs = req.json()
-            return True
-        else:
-            return False
+    def login(self):
+        """ Creates a new session """
+        try:
+            # Try to get the JWT token from Basic Fit
+            jwt_token = basic_fit_api.get_jwt_from_credentials(self.email, self.password)
+            # Exchange JWT token for Cookie
+            return basic_fit_api.exchange_jwt_for_session(jwt_token)
+        except Exception as error:
+            exit(error)
 
-    def get_member(self):
-        """ Get all of the clubs of Basic Fit """
-        req = self.session.get(self.member_url)
-        # Check for status
-        if req.status_code == 200:
-            self.user = req.json()
-            return True
-        else:
-            return False
+    def inform_about_reservation(self):
+        print(
+            "Your reservation for {} at {} is confirmed! You'll receive an email from Basic-Fit any second.".format(
+                self.date_for_booking.strftime('%d-%m-%Y %H:%M'),
+                self.user['favorite_club']['name']
+            )
+        )
+        self.credits()
 
-    def create_times_request_body(self):
-        """ Creates a body for the login request """
-        return json.dumps({
-            "clubId": self.club["id"],
-            "dateTime": datetime.today().strftime('%Y-%m-%d')
-        })
-
-    def get_times(self):
-        """ Get all of the clubs of Basic Fit """
-        req = self.session.post(self.times_url, self.create_times_request_body())
-        # Check for status
-        if req.status_code == 200:
-            self.times = req.json()
-            return True
-        else:
-            return False
-
-    def create_reservation_request_body(self):
-        """ Creates a body for the login request """
-        return json.dumps({
-            "clubOfChoice": self.club,
-            "doorPolicy": self.reserve_at,
-            "duration": 90
-        })
-
-    def post_reservation(self):
-        """ Do actual reservation """
-        res = self.session.post(self.book_url, self.create_reservation_request_body())
-
-    def has_open_reservation(self):
-        """ Check for open reservation """
-        res = self.session.get(self.open_reservation_url)
-        # Check if data isset
-        if len(res.json()["data"]) > 0:
-            return True
-        else:
-            return False
+    def credits(self):
+        print("---")
+        print("Issues, new ideas and stars are welcome!")
+        print("https://github.com/sembogaarts/gymtime")
 
 
 def main():
-    """ Shorcut for passing username and password """
+    """ Shorcut for passing email and password """
     parser = argparse.ArgumentParser()
     # Add arguments
-    parser.add_argument('-u', dest="username")
-    parser.add_argument('-p', dest="password")
-    parser.add_argument('-c', dest="club")
-    parser.add_argument('-t', dest="time")
+    parser.add_argument('-u', dest="email", help="E-mail used for your Basic-Fit account")
+    parser.add_argument('-p', dest="password", help="Password used for your Basic-Fit account")
+    parser.add_argument('-d', dest="date", help="Date for the reservations (dd-mm-yyyy)")
+    parser.add_argument('-t', dest="time", help="Time for the reservations (hh:mm)")
+    parser.add_argument('-i', dest="interval", help="Interval in seconds before retrying again", default="30")
     # Parse
     args = parser.parse_args()
     # New Basic Instance
-    BasicFit(args.username,
-             args.password,
-             args.club,
-             args.time)
+    BasicFit(
+        args.email,
+        args.password,
+        args.date,
+        args.time,
+        args.interval
+    )
 
 
 main()
