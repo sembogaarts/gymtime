@@ -1,6 +1,6 @@
 # Basic-Fit CLI (unofficial)
 
-Tired of checking the Basic-Fit app again and again for your favourite time to be available? This script allows you to reserve your sessions through the CLI.
+Tired of checking the Basic-Fit app for your favourite time to become available over and over again? This script allows you to reserve your sessions through the CLI, if it's not available it will automatically retry until it is!
 
 
 
