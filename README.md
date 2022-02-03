@@ -21,9 +21,14 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-After installation you'll be able the use the script with the following command.
+After installation you'll be able the use the script, below is the most easy way to start the script.
 ```
-usage: python main.py [-h] [-u EMAIL] [-p PASSWORD] [-d DATE] [-t TIME] [-i INTERVAL]
+python main.py
+```
+
+If you don't want to interact with the wizard, you can pass in some arguments to make the process even faster.
+```
+usage: main.py [-h] [-u EMAIL] [-p PASSWORD] [-d DATE] [-t TIME] [-i INTERVAL]
 
 optional arguments:
   -h, --help   show this help message and exit
